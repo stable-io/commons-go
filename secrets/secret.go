@@ -28,8 +28,6 @@ func (fs *fileSecret) Value() string {
 	return fs.value.Get()
 }
 
-// ListenChanges Changes returns a new dedicated channel for receiving secret updates
-// File watching starts lazily on first call to Changes()
 func (fs *fileSecret) ListenChanges() (<-chan string, error) {
 
 	if fs.closed.Get() {
@@ -142,12 +140,4 @@ func (fs *fileSecret) Close() {
 		}
 		fs.subscribers.Set([]subscriberInfo{})
 	})
-}
-
-func (fs *fileSecret) setError(err error) {
-	fs.err.Set(err)
-}
-
-func (fs *fileSecret) Err() error {
-	return fs.err.Get()
 }

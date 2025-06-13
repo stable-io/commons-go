@@ -1,5 +1,8 @@
 # Secrets Package
 
+[![Tests](https://github.com/stable-io/commons-go/actions/workflows/secrets-tests.yml/badge.svg)](https://github.com/stable-io/commons-go/actions/workflows/secrets-tests.yml)
+[![Coverage](https://codecov.io/gh/stable-io/commons-go/branch/main/graph/badge.svg?flag=secrets)](https://codecov.io/gh/stable-io/commons-go)
+
 Go package for managing and watching file-based secrets with real-time change notifications.
 
 

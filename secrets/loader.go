@@ -16,8 +16,9 @@ const DefaultBasePath = "/mnt/secrets_store"
 // Secret represents a watchable secret with change notifications
 type Secret interface {
 	Value() string
+	// ListenChanges returns a new dedicated channel for receiving secret updates.
+	// The returned channel will be closed when the secret will not be watched anymore, this could be due to an error.
 	ListenChanges() (<-chan string, error) // Each call returns a new dedicated channel
-	Err() error
 }
 
 // SecretLoader defines the interface for loading secrets (Port in Hexagonal Architecture)
@@ -36,7 +37,7 @@ type fileSecretLoader struct {
 	watcherFactory FileWatcherFactory
 	watcher        FileWatcher
 	secrets        ConcurrentMap[string, *fileSecret]
-	err            error
+	err            ConcurrentValue[error]
 }
 
 // subscriberInfo holds channel and failure tracking
@@ -213,5 +214,9 @@ func (fsl *fileSecretLoader) handleFileChange(filePath string) {
 }
 
 func (fsl *fileSecretLoader) setError(err error) {
-	fsl.err = err
+	fsl.err.Set(err)
+}
+
+func (fsl *fileSecretLoader) Err() error {
+	return fsl.err.Get()
 }
