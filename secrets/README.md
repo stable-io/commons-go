@@ -1,16 +1,7 @@
 # Secrets Package
 
-A Go package for managing and watching file-based secrets with real-time change notifications.
+Go package for managing and watching file-based secrets with real-time change notifications.
 
-## Overview
-
-The secrets package provides a robust solution for managing secrets stored in files. It offers:
-
-- File-based secret storage
-- Real-time secret change notifications
-- Thread-safe concurrent access
-- Resource cleanup and error handling
-- Configurable file system and watcher implementations
 
 ## Installation
 
@@ -80,7 +71,7 @@ loader, err := secrets.NewFileSecretLoader(
 
 ## File Structure
 
-By default, secrets are expected to be in `/mnt/secrets_store/`. Each secret should be a separate file:
+By default, the package watches and loads secrets from `/mnt/secrets_store/`. Each secret should be a separate file:
 
 ```
 /mnt/secrets_store/
@@ -88,6 +79,8 @@ By default, secrets are expected to be in `/mnt/secrets_store/`. Each secret sho
 ├── api-key
 └── database-password
 ```
+
+You can customize this path using the `WithBasePath` option when creating a new loader.
 
 ## Error Handling
 
