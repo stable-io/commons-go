@@ -194,6 +194,7 @@ func (fsl *fileSecretLoader) startWatching() error {
 					return
 				}
 				fsl.setError(errW)
+				return
 
 			case <-fsl.ctx.Done():
 				return
