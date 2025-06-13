@@ -13,7 +13,7 @@ type fileSecret struct {
 	id             string
 	path           string
 	value          ConcurrentValue[string]
-	subscribers    concurrentList[subscriberInfo]
+	subscribers    ConcurrentList[subscriberInfo]
 	watcher        ConcurrentValue[FileWatcher]
 	watchOnce      sync.Once
 	closed         ConcurrentValue[bool]

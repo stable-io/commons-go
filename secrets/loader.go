@@ -23,6 +23,7 @@ type Secret interface {
 // SecretLoader defines the interface for loading secrets (Port in Hexagonal Architecture)
 type SecretLoader interface {
 	GetSecret(secretKey string) (Secret, error)
+	Close()
 }
 
 type fileSecretLoader struct {
@@ -34,7 +35,7 @@ type fileSecretLoader struct {
 	reader         FileReader
 	watcherFactory FileWatcherFactory
 	watcher        FileWatcher
-	secrets        concurrentMap[string, *fileSecret]
+	secrets        ConcurrentMap[string, *fileSecret]
 	err            error
 }
 
@@ -76,7 +77,9 @@ func NewFileSecretLoader(ctx context.Context, opts ...Option) (SecretLoader, err
 		basePath:       DefaultBasePath,
 		reader:         &osReadFile{},
 		watcherFactory: &fsNotifyWatcherFactory{},
-		secrets:        concurrentMap[string, *fileSecret]{},
+		secrets: ConcurrentMap[string, *fileSecret]{
+			value: make(map[string]*fileSecret),
+		},
 	}
 
 	// Apply all provided options
@@ -113,7 +116,8 @@ func (fsl *fileSecretLoader) GetSecret(secretKey string) (Secret, error) {
 	secretPath := filepath.Join(fsl.basePath, secretKey)
 
 	// Check if file exists and read initial value
-	if _, err := os.Stat(secretPath); os.IsNotExist(err) {
+	//if _, err := os.Stat(secretPath); os.IsNotExist(err) {
+	if _, err := fsl.reader.Stat(secretPath); os.IsNotExist(err) {
 		return nil, fmt.Errorf("secret file not found: %s", secretPath)
 	}
 
@@ -134,7 +138,7 @@ func (fsl *fileSecretLoader) GetSecret(secretKey string) (Secret, error) {
 		watcher: ConcurrentValue[FileWatcher]{
 			value: fsl.watcher,
 		},
-		subscribers: concurrentList[subscriberInfo]{},
+		subscribers: ConcurrentList[subscriberInfo]{},
 		closed:      ConcurrentValue[bool]{},
 		err:         ConcurrentValue[error]{},
 	}
@@ -201,7 +205,7 @@ func (fsl *fileSecretLoader) startWatching() error {
 
 func (fsl *fileSecretLoader) handleFileChange(filePath string) {
 	for k, fs := range fsl.secrets.CopyMap() {
-		if strings.Contains(k, filePath) {
+		if strings.Contains(filePath, k) {
 			fs.handleFileChange()
 		}
 	}

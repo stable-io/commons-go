@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"io/fs"
 	"os"
 
 	"github.com/fsnotify/fsnotify"
@@ -9,6 +10,7 @@ import (
 // FileReader defines the interface for reading file contents
 type FileReader interface {
 	ReadFile(path string) ([]byte, error)
+	Stat(name string) (fs.FileInfo, error)
 }
 
 // FileWatcher defines the interface for watching file changes
@@ -30,6 +32,10 @@ type osReadFile struct{}
 
 func (r *osReadFile) ReadFile(path string) ([]byte, error) {
 	return os.ReadFile(path)
+}
+
+func (r *osReadFile) Stat(name string) (fs.FileInfo, error) {
+	return os.Stat(name)
 }
 
 // fsNotifyWatcherFactory implements FileWatcherFactory using fsnotify
