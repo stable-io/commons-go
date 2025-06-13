@@ -3,11 +3,12 @@ package secrets
 import (
 	"context"
 	"fmt"
-	"github.com/fsnotify/fsnotify"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 const DefaultBasePath = "/mnt/secrets_store"
@@ -28,7 +29,7 @@ type fileSecretLoader struct {
 	basePath       string
 	ctx            context.Context
 	cancelCtxFn    context.CancelFunc
-	isClosed       concurrentValue[bool]
+	isClosed       ConcurrentValue[bool]
 	closeOnce      sync.Once
 	reader         FileReader
 	watcherFactory FileWatcherFactory
@@ -97,7 +98,7 @@ func NewFileSecretLoader(ctx context.Context, opts ...Option) (SecretLoader, err
 // GetSecret loads a secret and returns a Secret object that can be watched for changes
 func (fsl *fileSecretLoader) GetSecret(secretKey string) (Secret, error) {
 
-	if fsl.isClosed.get() {
+	if fsl.isClosed.Get() {
 		return nil, fmt.Errorf("secret loader is closed")
 	}
 
@@ -127,15 +128,15 @@ func (fsl *fileSecretLoader) GetSecret(secretKey string) (Secret, error) {
 		path:           secretPath,
 		reader:         fsl.reader,
 		watcherFactory: fsl.watcherFactory,
-		value: concurrentValue[string]{
+		value: ConcurrentValue[string]{
 			value: string(content),
 		},
-		watcher: concurrentValue[FileWatcher]{
+		watcher: ConcurrentValue[FileWatcher]{
 			value: fsl.watcher,
 		},
 		subscribers: concurrentList[subscriberInfo]{},
-		closed:      concurrentValue[bool]{},
-		err:         concurrentValue[error]{},
+		closed:      ConcurrentValue[bool]{},
+		err:         ConcurrentValue[error]{},
 	}
 
 	fsl.secrets.Set(secretKey, result)
@@ -149,7 +150,7 @@ func (fsl *fileSecretLoader) GetBasePath() string {
 
 func (fsl *fileSecretLoader) Close() {
 	fsl.closeOnce.Do(func() {
-		fsl.isClosed.set(true)
+		fsl.isClosed.Set(true)
 		// signal startWatching loop to exit
 		fsl.cancelCtxFn()
 

@@ -3,42 +3,43 @@ package secrets
 import (
 	"context"
 	"fmt"
-	"github.com/fsnotify/fsnotify"
 	"sync"
+
+	"github.com/fsnotify/fsnotify"
 )
 
 // fileSecret implements Secret interface with file watching capabilities
 type fileSecret struct {
 	id             string
 	path           string
-	value          concurrentValue[string]
+	value          ConcurrentValue[string]
 	subscribers    concurrentList[subscriberInfo]
-	watcher        concurrentValue[FileWatcher]
+	watcher        ConcurrentValue[FileWatcher]
 	watchOnce      sync.Once
-	closed         concurrentValue[bool]
+	closed         ConcurrentValue[bool]
 	closeOnce      sync.Once
 	ctx            context.Context
-	err            concurrentValue[error]
+	err            ConcurrentValue[error]
 	reader         FileReader
 	watcherFactory FileWatcherFactory
 }
 
 func (fs *fileSecret) Value() string {
-	return fs.value.get()
+	return fs.value.Get()
 }
 
 // ListenChanges Changes returns a new dedicated channel for receiving secret updates
 // File watching starts lazily on first call to Changes()
 func (fs *fileSecret) ListenChanges() (<-chan string, error) {
 
-	if fs.closed.get() {
+	if fs.closed.Get() {
 		return nil, fmt.Errorf("secret %s is closed", fs.id)
 	}
 
 	var err error
 	// Start watching on first subscriber (lazy initialization)
 	fs.watchOnce.Do(func() {
-		w := fs.watcher.get()
+		w := fs.watcher.Get()
 		if w == nil {
 			err = fmt.Errorf("file watcher is not initialized")
 		} else {
@@ -59,7 +60,7 @@ func (fs *fileSecret) ListenChanges() (<-chan string, error) {
 }
 
 func (fs *fileSecret) getFileEvents() <-chan fsnotify.Event {
-	w := fs.watcher.get()
+	w := fs.watcher.Get()
 	if w == nil {
 		c := make(chan fsnotify.Event)
 		close(c)
@@ -69,7 +70,7 @@ func (fs *fileSecret) getFileEvents() <-chan fsnotify.Event {
 }
 
 func (fs *fileSecret) watchingErrorEvents() <-chan error {
-	w := fs.watcher.get()
+	w := fs.watcher.Get()
 	if w == nil {
 		c := make(chan error)
 		close(c)
@@ -80,7 +81,7 @@ func (fs *fileSecret) watchingErrorEvents() <-chan error {
 
 // addWatchPath initializes file watching and handles file change events
 func (fs *fileSecret) addWatchPath() error {
-	watcher := fs.watcher.get()
+	watcher := fs.watcher.Get()
 	if watcher == nil {
 		return fmt.Errorf("missing file watcher")
 	}
@@ -98,12 +99,12 @@ func (fs *fileSecret) handleFileChange() {
 
 	newValue := string(content)
 
-	if newValue == fs.value.get() {
+	if newValue == fs.value.Get() {
 		return // No change, skip broadcasting
 	}
 
 	// Update cached value
-	fs.value.set(newValue)
+	fs.value.Set(newValue)
 
 	// Broadcast to all subscribers with failure tracking
 	subscribers := fs.subscribers.Get()
@@ -126,14 +127,14 @@ func (fs *fileSecret) handleFileChange() {
 func (fs *fileSecret) Close() {
 
 	// Already closed
-	if fs.closed.get() {
+	if fs.closed.Get() {
 		return
 	}
 
 	// Ensure close logic runs only once
 	fs.closeOnce.Do(func() {
 		// first avoid close the door for new subscribers
-		fs.closed.set(true)
+		fs.closed.Set(true)
 
 		// signal all subscribers that the secret is closed
 		for _, sub := range fs.subscribers.Get() {
@@ -144,9 +145,9 @@ func (fs *fileSecret) Close() {
 }
 
 func (fs *fileSecret) setError(err error) {
-	fs.err.set(err)
+	fs.err.Set(err)
 }
 
 func (fs *fileSecret) Err() error {
-	return fs.err.get()
+	return fs.err.Get()
 }
