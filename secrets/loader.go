@@ -102,7 +102,7 @@ func NewFileSecretLoader(ctx context.Context, opts ...Option) (SecretLoader, err
 
 func (fsl *fileSecretLoader) ListSecretKeys() []string {
 	if fsl.isClosed.Get() {
-		return nil // Return empty list if loader is closed
+		return []string{}
 	}
 	secretsCopy := fsl.secrets.CopyMap()
 	keys := make([]string, 0, len(secretsCopy))

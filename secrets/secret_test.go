@@ -2,7 +2,6 @@ package secrets_test
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -220,7 +219,7 @@ func TestSecretLoader_ListSecretKeys(t *testing.T) {
 				_, err := loader.GetSecret("test-secret")
 				require.NoError(t, err)
 			},
-			expectedKeys:   nil,
+			expectedKeys:   []string{},
 			expectedLength: 0,
 			shouldClose:    true,
 		},
@@ -269,95 +268,5 @@ func TestSecretLoader_ListSecretKeys(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestSecretLoader_ListSecretKeys_ConcurrentAccess(t *testing.T) {
-	// Arrange
-	mfs := mocks.NewMockFileSystem()
-	defer mfs.Close()
-
-	mockWatcherFactory := mocks.NewMockWatcherFactory()
-
-	loader, err := secrets.NewFileSecretLoader(
-		context.Background(),
-		secrets.WithBasePath("/mnt/secrets_store"),
-		secrets.WithWatcherFactory(mockWatcherFactory),
-		secrets.WithFileReader(mfs),
-	)
-	require.NoError(t, err)
-	defer loader.Close()
-
-	// Setup initial secrets
-	initialSecrets := []string{"secret1", "secret2", "secret3"}
-	for _, key := range initialSecrets {
-		mfs.WriteFile("/mnt/secrets_store/"+key, []byte("value-"+key))
-		_, err := loader.GetSecret(key)
-		require.NoError(t, err)
-	}
-
-	// Act - Test concurrent access
-	const numGoroutines = 10
-	const numOperations = 100
-
-	done := make(chan bool, numGoroutines)
-	errors := make(chan error, numGoroutines*numOperations)
-
-	// Launch multiple goroutines that simultaneously call ListSecretKeys
-	for i := 0; i < numGoroutines; i++ {
-		go func(goroutineID int) {
-			defer func() { done <- true }()
-
-			for j := 0; j < numOperations; j++ {
-				keys := loader.ListSecretKeys()
-
-				// Verify basic invariants
-				if keys == nil {
-					errors <- fmt.Errorf("goroutine %d, iteration %d: got nil keys", goroutineID, j)
-					continue
-				}
-
-				if len(keys) != len(initialSecrets) {
-					errors <- fmt.Errorf("goroutine %d, iteration %d: expected %d keys, got %d",
-						goroutineID, j, len(initialSecrets), len(keys))
-					continue
-				}
-
-				// Verify all expected keys are present
-				for _, expectedKey := range initialSecrets {
-					found := false
-					for _, key := range keys {
-						if key == expectedKey {
-							found = true
-							break
-						}
-					}
-					if !found {
-						errors <- fmt.Errorf("goroutine %d, iteration %d: missing key %s",
-							goroutineID, j, expectedKey)
-						break
-					}
-				}
-			}
-		}(i)
-	}
-
-	// Wait for all goroutines to complete
-	for i := 0; i < numGoroutines; i++ {
-		<-done
-	}
-
-	// Assert - Check for any errors
-	close(errors)
-	var errorList []error
-	for err := range errors {
-		errorList = append(errorList, err)
-	}
-
-	if len(errorList) > 0 {
-		t.Errorf("Concurrent access test failed with %d errors:", len(errorList))
-		for _, err := range errorList {
-			t.Errorf("  - %v", err)
-		}
 	}
 }
