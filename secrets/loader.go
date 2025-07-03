@@ -25,6 +25,7 @@ type Secret interface {
 type SecretLoader interface {
 	GetSecret(secretKey string) (Secret, error)
 	Close()
+	ListSecretKeys() []string
 }
 
 type fileSecretLoader struct {
@@ -97,6 +98,18 @@ func NewFileSecretLoader(ctx context.Context, opts ...Option) (SecretLoader, err
 	err = fsl.startWatching()
 
 	return fsl, err
+}
+
+func (fsl *fileSecretLoader) ListSecretKeys() []string {
+	if fsl.isClosed.Get() {
+		return nil // Return empty list if loader is closed
+	}
+	secretsCopy := fsl.secrets.CopyMap()
+	keys := make([]string, 0, len(secretsCopy))
+	for k := range secretsCopy {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // GetSecret loads a secret and returns a Secret object that can be watched for changes
