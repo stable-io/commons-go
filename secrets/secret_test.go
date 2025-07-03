@@ -2,9 +2,10 @@ package secrets_test
 
 import (
 	"context"
-	"github.com/stable-io/commons-go/secrets"
 	"testing"
 	"time"
+
+	"github.com/stable-io/commons-go/secrets"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -161,4 +162,111 @@ func TestSecretLoader_Close(t *testing.T) {
 	// Verify subsequent GetSecret fails
 	_, err = loader.GetSecret("test-secret")
 	assert.Error(t, err)
+}
+
+func TestSecretLoader_ListSecretKeys(t *testing.T) {
+	tests := []struct {
+		name           string
+		setupSecrets   func(*mocks.MockFileSystem, secrets.SecretLoader)
+		expectedKeys   []string
+		expectedLength int
+		shouldClose    bool
+	}{
+		{
+			name: "empty loader returns empty list",
+			setupSecrets: func(mfs *mocks.MockFileSystem, loader secrets.SecretLoader) {
+				// No secrets loaded
+			},
+			expectedKeys:   []string{},
+			expectedLength: 0,
+			shouldClose:    false,
+		},
+		{
+			name: "single secret loaded",
+			setupSecrets: func(mfs *mocks.MockFileSystem, loader secrets.SecretLoader) {
+				mfs.WriteFile("/mnt/secrets_store/api-key", []byte("secret-api-key"))
+				_, err := loader.GetSecret("api-key")
+				require.NoError(t, err)
+			},
+			expectedKeys:   []string{"api-key"},
+			expectedLength: 1,
+			shouldClose:    false,
+		},
+		{
+			name: "multiple secrets loaded",
+			setupSecrets: func(mfs *mocks.MockFileSystem, loader secrets.SecretLoader) {
+				// Setup multiple secrets
+				secrets := map[string]string{
+					"api-key":           "secret-api-key",
+					"database-password": "db-password",
+					"jwt-token":         "jwt-secret",
+				}
+				for key, value := range secrets {
+					mfs.WriteFile("/mnt/secrets_store/"+key, []byte(value))
+					_, err := loader.GetSecret(key)
+					require.NoError(t, err)
+				}
+			},
+			expectedKeys:   []string{"api-key", "database-password", "jwt-token"},
+			expectedLength: 3,
+			shouldClose:    false,
+		},
+		{
+			name: "closed loader returns nil",
+			setupSecrets: func(mfs *mocks.MockFileSystem, loader secrets.SecretLoader) {
+				// Setup a secret first
+				mfs.WriteFile("/mnt/secrets_store/test-secret", []byte("test-value"))
+				_, err := loader.GetSecret("test-secret")
+				require.NoError(t, err)
+			},
+			expectedKeys:   []string{},
+			expectedLength: 0,
+			shouldClose:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			mfs := mocks.NewMockFileSystem()
+			defer mfs.Close()
+
+			mockWatcherFactory := mocks.NewMockWatcherFactory()
+
+			loader, err := secrets.NewFileSecretLoader(
+				context.Background(),
+				secrets.WithBasePath("/mnt/secrets_store"),
+				secrets.WithWatcherFactory(mockWatcherFactory),
+				secrets.WithFileReader(mfs),
+			)
+			require.NoError(t, err)
+			defer loader.Close()
+
+			// Setup test-specific secrets
+			tt.setupSecrets(mfs, loader)
+
+			// Close loader if test requires it
+			if tt.shouldClose {
+				loader.Close()
+			}
+
+			// Act
+			keys := loader.ListSecretKeys()
+
+			// Assert
+			if tt.expectedKeys == nil {
+				assert.Nil(t, keys, "expected nil result for closed loader")
+			} else {
+				assert.NotNil(t, keys, "expected non-nil result for active loader")
+				assert.Len(t, keys, tt.expectedLength, "unexpected number of keys")
+
+				// For non-empty expected keys, verify all expected keys are present
+				if len(tt.expectedKeys) > 0 {
+					for _, expectedKey := range tt.expectedKeys {
+						assert.Contains(t, keys, expectedKey, "expected key not found: %s", expectedKey)
+					}
+				}
+			}
+		})
+	}
 }
