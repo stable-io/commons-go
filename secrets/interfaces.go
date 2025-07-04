@@ -11,6 +11,7 @@ import (
 type FileReader interface {
 	ReadFile(path string) ([]byte, error)
 	Stat(name string) (fs.FileInfo, error)
+	ReadDir(dirname string) ([]fs.DirEntry, error)
 }
 
 // FileWatcher defines the interface for watching file changes
@@ -36,6 +37,10 @@ func (r *osReadFile) ReadFile(path string) ([]byte, error) {
 
 func (r *osReadFile) Stat(name string) (fs.FileInfo, error) {
 	return os.Stat(name)
+}
+
+func (r *osReadFile) ReadDir(dirname string) ([]fs.DirEntry, error) {
+	return os.ReadDir(dirname)
 }
 
 // fsNotifyWatcherFactory implements FileWatcherFactory using fsnotify

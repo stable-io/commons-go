@@ -167,61 +167,85 @@ func TestSecretLoader_Close(t *testing.T) {
 func TestSecretLoader_ListSecretKeys(t *testing.T) {
 	tests := []struct {
 		name           string
-		setupSecrets   func(*mocks.MockFileSystem, secrets.SecretLoader)
+		setupFiles     func(*mocks.MockFileSystem)
 		expectedKeys   []string
 		expectedLength int
 		shouldClose    bool
+		expectError    bool
 	}{
 		{
-			name: "empty loader returns empty list",
-			setupSecrets: func(mfs *mocks.MockFileSystem, loader secrets.SecretLoader) {
-				// No secrets loaded
+			name: "empty directory returns empty list",
+			setupFiles: func(mfs *mocks.MockFileSystem) {
+				// Create the base directory but no files
+				mfs.CreateDir("/mnt/secrets_store")
 			},
 			expectedKeys:   []string{},
 			expectedLength: 0,
 			shouldClose:    false,
+			expectError:    false,
 		},
 		{
-			name: "single secret loaded",
-			setupSecrets: func(mfs *mocks.MockFileSystem, loader secrets.SecretLoader) {
+			name: "directory with regular files",
+			setupFiles: func(mfs *mocks.MockFileSystem) {
 				mfs.WriteFile("/mnt/secrets_store/api-key", []byte("secret-api-key"))
-				_, err := loader.GetSecret("api-key")
-				require.NoError(t, err)
-			},
-			expectedKeys:   []string{"api-key"},
-			expectedLength: 1,
-			shouldClose:    false,
-		},
-		{
-			name: "multiple secrets loaded",
-			setupSecrets: func(mfs *mocks.MockFileSystem, loader secrets.SecretLoader) {
-				// Setup multiple secrets
-				secrets := map[string]string{
-					"api-key":           "secret-api-key",
-					"database-password": "db-password",
-					"jwt-token":         "jwt-secret",
-				}
-				for key, value := range secrets {
-					mfs.WriteFile("/mnt/secrets_store/"+key, []byte(value))
-					_, err := loader.GetSecret(key)
-					require.NoError(t, err)
-				}
+				mfs.WriteFile("/mnt/secrets_store/database-password", []byte("db-password"))
+				mfs.WriteFile("/mnt/secrets_store/jwt-token", []byte("jwt-secret"))
 			},
 			expectedKeys:   []string{"api-key", "database-password", "jwt-token"},
 			expectedLength: 3,
 			shouldClose:    false,
+			expectError:    false,
 		},
 		{
-			name: "closed loader returns nil",
-			setupSecrets: func(mfs *mocks.MockFileSystem, loader secrets.SecretLoader) {
-				// Setup a secret first
+			name: "directory with hidden files excludes them",
+			setupFiles: func(mfs *mocks.MockFileSystem) {
+				mfs.WriteFile("/mnt/secrets_store/api-key", []byte("secret-api-key"))
+				mfs.WriteFile("/mnt/secrets_store/.hidden-file", []byte("hidden-content"))
+				mfs.WriteFile("/mnt/secrets_store/..double-hidden", []byte("double-hidden"))
+			},
+			expectedKeys:   []string{"api-key"},
+			expectedLength: 1,
+			shouldClose:    false,
+			expectError:    false,
+		},
+		{
+			name: "directory with only hidden files returns empty",
+			setupFiles: func(mfs *mocks.MockFileSystem) {
+				mfs.WriteFile("/mnt/secrets_store/.hidden-file", []byte("hidden-content"))
+				mfs.WriteFile("/mnt/secrets_store/.another-hidden", []byte("another-hidden"))
+			},
+			expectedKeys:   []string{},
+			expectedLength: 0,
+			shouldClose:    false,
+			expectError:    false,
+		},
+		{
+			name: "mixed file types filters correctly",
+			setupFiles: func(mfs *mocks.MockFileSystem) {
+				// Regular files (should be included)
+				mfs.WriteFile("/mnt/secrets_store/api-key", []byte("secret-api-key"))
+				mfs.WriteFile("/mnt/secrets_store/database-password", []byte("db-password"))
+				// Hidden files (should be excluded)
+				mfs.WriteFile("/mnt/secrets_store/.hidden-file", []byte("hidden-content"))
+				mfs.WriteFile("/mnt/secrets_store/.gitignore", []byte("*.log"))
+				// Subdirectories (should be excluded)
+				mfs.CreateDir("/mnt/secrets_store/subdirectory")
+				mfs.CreateDir("/mnt/secrets_store/another-dir")
+			},
+			expectedKeys:   []string{"api-key", "database-password"},
+			expectedLength: 2,
+			shouldClose:    false,
+			expectError:    false,
+		},
+		{
+			name: "closed loader returns error",
+			setupFiles: func(mfs *mocks.MockFileSystem) {
 				mfs.WriteFile("/mnt/secrets_store/test-secret", []byte("test-value"))
-				_, err := loader.GetSecret("test-secret")
-				require.NoError(t, err)
 			},
 			expectedKeys:   []string{},
 			expectedLength: 0,
 			shouldClose:    true,
+			expectError:    true,
 		},
 	}
 
@@ -242,8 +266,8 @@ func TestSecretLoader_ListSecretKeys(t *testing.T) {
 			require.NoError(t, err)
 			defer loader.Close()
 
-			// Setup test-specific secrets
-			tt.setupSecrets(mfs, loader)
+			// Setup test-specific files
+			tt.setupFiles(mfs)
 
 			// Close loader if test requires it
 			if tt.shouldClose {
@@ -251,12 +275,17 @@ func TestSecretLoader_ListSecretKeys(t *testing.T) {
 			}
 
 			// Act
-			keys := loader.ListSecretKeys()
+			keys, err := loader.ListSecretKeys()
 
 			// Assert
-			if tt.expectedKeys == nil {
-				assert.Nil(t, keys, "expected nil result for closed loader")
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.shouldClose {
+					assert.Contains(t, err.Error(), "closed")
+				}
+				assert.Equal(t, tt.expectedKeys, keys)
 			} else {
+				assert.NoError(t, err)
 				assert.NotNil(t, keys, "expected non-nil result for active loader")
 				assert.Len(t, keys, tt.expectedLength, "unexpected number of keys")
 
@@ -267,6 +296,47 @@ func TestSecretLoader_ListSecretKeys(t *testing.T) {
 					}
 				}
 			}
+		})
+	}
+}
+
+func TestSecretLoader_ListSecretKeys_DirectoryErrors(t *testing.T) {
+	tests := []struct {
+		name        string
+		basePath    string
+		expectedErr string
+	}{
+		{
+			name:        "non-existent directory returns error",
+			basePath:    "/non/existent/path",
+			expectedErr: "failed to read secrets directory",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			mfs := mocks.NewMockFileSystem()
+			defer mfs.Close()
+
+			mockWatcherFactory := mocks.NewMockWatcherFactory()
+
+			loader, err := secrets.NewFileSecretLoader(
+				context.Background(),
+				secrets.WithBasePath(tt.basePath),
+				secrets.WithWatcherFactory(mockWatcherFactory),
+				secrets.WithFileReader(mfs),
+			)
+			require.NoError(t, err)
+			defer loader.Close()
+
+			// Act
+			keys, err := loader.ListSecretKeys()
+
+			// Assert
+			assert.Error(t, err)
+			assert.Contains(t, err.Error(), tt.expectedErr)
+			assert.Empty(t, keys)
 		})
 	}
 }

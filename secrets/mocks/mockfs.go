@@ -3,6 +3,7 @@ package mocks
 import (
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -26,6 +27,7 @@ func (m *mockFileInfo) Sys() interface{}   { return nil }
 // MockFileSystem provides a deterministic in-memory file system for testing
 type MockFileSystem struct {
 	files     map[string][]byte
+	dirs      map[string]bool
 	mu        sync.RWMutex
 	writeChan chan string
 }
@@ -34,6 +36,7 @@ type MockFileSystem struct {
 func NewMockFileSystem() *MockFileSystem {
 	return &MockFileSystem{
 		files:     make(map[string][]byte),
+		dirs:      make(map[string]bool),
 		writeChan: make(chan string, 100),
 	}
 }
@@ -48,7 +51,19 @@ func (m *MockFileSystem) WriteFile(path string, content []byte) {
 	copy(contentCopy, content)
 
 	m.files[path] = contentCopy
+
+	// Ensure the directory exists
+	dir := filepath.Dir(path)
+	m.dirs[dir] = true
+
 	m.writeChan <- path
+}
+
+// CreateDir creates a directory entry
+func (m *MockFileSystem) CreateDir(path string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dirs[path] = true
 }
 
 // ReadFile reads content from a file
@@ -102,4 +117,73 @@ func (m *MockFileSystem) GetWriteEvents() <-chan string {
 // Close cleans up resources
 func (m *MockFileSystem) Close() {
 	close(m.writeChan)
+}
+
+// ReadDir reads directory entries
+func (m *MockFileSystem) ReadDir(dirname string) ([]fs.DirEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	// Check if directory exists (either as a directory or has files in it)
+	dirExists := m.dirs[dirname]
+	hasFiles := false
+	for path := range m.files {
+		if filepath.Dir(path) == dirname {
+			hasFiles = true
+			break
+		}
+	}
+
+	if !dirExists && !hasFiles {
+		return nil, &os.PathError{Op: "readdir", Path: dirname, Err: os.ErrNotExist}
+	}
+
+	var entries []fs.DirEntry
+
+	// Add file entries
+	for path := range m.files {
+		dir := filepath.Dir(path)
+		if dir == dirname {
+			filename := filepath.Base(path)
+			entries = append(entries, &mockDirEntry{
+				name:  filename,
+				isDir: false,
+			})
+		}
+	}
+
+	// Add directory entries
+	for path := range m.dirs {
+		dir := filepath.Dir(path)
+		if dir == dirname {
+			dirname := filepath.Base(path)
+			entries = append(entries, &mockDirEntry{
+				name:  dirname,
+				isDir: true,
+			})
+		}
+	}
+
+	return entries, nil
+}
+
+// mockDirEntry implements fs.DirEntry for testing
+type mockDirEntry struct {
+	name  string
+	isDir bool
+}
+
+func (m *mockDirEntry) Name() string { return m.name }
+func (m *mockDirEntry) IsDir() bool  { return m.isDir }
+func (m *mockDirEntry) Type() fs.FileMode {
+	if m.isDir {
+		return fs.ModeDir
+	}
+	return 0
+}
+func (m *mockDirEntry) Info() (fs.FileInfo, error) {
+	return &mockFileInfo{
+		name:  m.name,
+		isDir: m.isDir,
+	}, nil
 }
