@@ -25,7 +25,7 @@ type Secret interface {
 type SecretLoader interface {
 	GetSecret(secretKey string) (Secret, error)
 	Close()
-	ListSecretKeys() []string
+	ListSecretKeys() ([]string, error)
 }
 
 type fileSecretLoader struct {
@@ -100,16 +100,26 @@ func NewFileSecretLoader(ctx context.Context, opts ...Option) (SecretLoader, err
 	return fsl, err
 }
 
-func (fsl *fileSecretLoader) ListSecretKeys() []string {
+func (fsl *fileSecretLoader) ListSecretKeys() ([]string, error) {
+	keys := []string{}
+
 	if fsl.isClosed.Get() {
-		return []string{}
+		return keys, fmt.Errorf("secret loader is closed")
 	}
-	secretsCopy := fsl.secrets.CopyMap()
-	keys := make([]string, 0, len(secretsCopy))
-	for k := range secretsCopy {
-		keys = append(keys, k)
+
+	entries, err := fsl.reader.ReadDir(fsl.basePath)
+	if err != nil {
+		return keys, fmt.Errorf("failed to read secrets directory: %w", err)
 	}
-	return keys
+
+	for _, entry := range entries {
+		// Filter: only regular files, exclude hidden files
+		if !entry.IsDir() && !strings.HasPrefix(entry.Name(), ".") {
+			keys = append(keys, entry.Name())
+		}
+	}
+
+	return keys, nil
 }
 
 // GetSecret loads a secret and returns a Secret object that can be watched for changes
